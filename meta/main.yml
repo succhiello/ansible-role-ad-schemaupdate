@@ -1,0 +1,14 @@
+galaxy_info:
+  author: Satoshi Ebihara
+  description: module role for Active Directory schema update.
+  license: MIT
+  min_ansible_version: 1.9
+  platforms:
+    - name: GenericUNIX
+      versions:
+        - all
+        - any
+  galaxy_tags:
+    - ldap
+    - authentication
+dependencies: []

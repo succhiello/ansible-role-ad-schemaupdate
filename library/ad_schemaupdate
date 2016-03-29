@@ -1,0 +1,129 @@
+#!/usr/bin/env python
+
+from traceback import format_exc
+
+import ldap
+import ldap.sasl
+
+DOCUMENTATION = """
+---
+module: ad_schemaupdate
+short_description: update Active Directory schema immediately.
+description:
+    - update Active Directory schema immediately.
+notes: []
+version_added: null
+author: Satoshi Ebihara
+requirements:
+    - python-ldap
+options:
+    server_uri:
+        required: false
+        default: ldapi:///
+        description:
+            - A URI to the LDAP server. The default value lets the underlying
+              LDAP client library look for a UNIX domain socket in its default
+              location.
+    start_tls:
+        required: false
+        default: false
+        description:
+            - If true, we'll use the START_TLS LDAP extension.
+    bind_dn:
+        required: false
+        description:
+            - A DN to bind with. If this is omitted, we'll try a SASL bind with
+              the EXTERNAL mechanism. If this is blank, we'll use an anonymous
+              bind.
+    bind_pw:
+        required: false
+        description:
+            - The password to use with C(bind_dn).
+"""
+
+
+EXAMPLES = """
+# update schema for example.com.
+- ad-schemaupdate:
+    server_uri: ldap://localhost/
+    bind_dn: "cn=admin,dc=example,dc=com"
+    bind_pw: secret
+"""
+
+
+def main():
+    module = AnsibleModule(
+        argument_spec={
+            'server_uri': dict(default='ldapi:///'),
+            'start_tls': dict(default='false', choices=BOOLEANS),
+            'bind_dn': dict(default=None),
+            'bind_pw': dict(default='', no_log=True),
+        },
+        supports_check_mode=True,
+    )
+
+    try:
+        AdSchemaUpdate(module).main()
+    except ldap.LDAPError, e:
+        module.fail_json(msg=str(e), exc=format_exc())
+
+
+class AdSchemaUpdate(object):
+
+    SCHEMA_UPDATE_NOW = 'schemaupdatenow'
+
+    def __init__(self, module):
+
+        self.module = module
+
+        self.server_uri = module.params['server_uri']
+        self.start_tls = module.boolean(module.params['start_tls'])
+        self.bind_dn = self.__utf8_param(module, 'bind_dn')
+        self.bind_pw = self.__utf8_param(module, 'bind_pw')
+
+        self.__connection = None
+
+    @property
+    def connection(self):
+        """ An authenticated connection to the LDAP server (cached). """
+        if self.__connection is None:
+            self.__connection = self.__connect_to_ldap()
+        return self.__connection
+
+    def main(self):
+
+        mod_list = [(ldap.MOD_REPLACE, self.SCHEMA_UPDATE_NOW, ['1'])]
+
+        if not self.module.check_mode:
+            self.connection.modify_s('', mod_list)
+            changed = True
+        else:
+            changed = False
+
+        self.module.exit_json(changed=changed, modlist=mod_list)
+
+    def __utf8_param(self, module, name):
+        return self.__force_utf8(module.params[name])
+
+    def __force_utf8(self, value):
+        """ If value is unicode, encode to utf-8. """
+        return value.encode('utf-8') if isinstance(value, unicode) else value
+
+    def __connect_to_ldap(self):
+
+        connection = ldap.initialize(self.server_uri)
+
+        if self.start_tls:
+            connection.start_tls_s()
+
+        if self.bind_dn is not None:
+            connection.simple_bind_s(self.bind_dn, self.bind_pw)
+        else:
+            connection.sasl_interactive_bind_s('', ldap.sasl.external())
+
+        return connection
+
+
+from ansible.module_utils.basic import *
+if __name__ == '__main__':
+  main()
